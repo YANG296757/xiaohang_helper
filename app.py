@@ -22,6 +22,8 @@ suggest_questions = [
     "图书馆开放时间",
     "校园快递站位置"
 ]
+# 兜底固定查询词：查询电话黄页
+PHONE_QUERY = "请列出郑州航院校园相关联系电话（电话黄页）"
 
 # 读取data目录所有md文档
 def load_context():
@@ -37,7 +39,7 @@ def llm_call(sys_prompt, user_q, doc_ctx):
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": sys_prompt + "\n参考资料：" + doc_ctx},
+            {"role": "system", "content": sys_prompt + "\n优先参考下面文档资料回答：" + doc_ctx},
             {"role": "user", "content": user_q}
         ]
     }
@@ -48,7 +50,7 @@ def llm_call(sys_prompt, user_q, doc_ctx):
     except Exception as e:
         return f"请求异常：{str(e)}，检查网络/API密钥余额。"
 
-# 初始化会话变量，存放输入框内容
+# 初始化会话变量
 if "user_query" not in st.session_state:
     st.session_state.user_query = ""
 
@@ -57,9 +59,8 @@ st.title("小航｜郑州航院校园信息AI助手")
 identity = st.radio("请选择你的身份", ["新生", "在校生", "教师"])
 
 st.markdown("**📌推荐咨询问题（点击方框按钮快速填充）**")
-# 分成3列摆放方框按钮
-col1, col2, col3 = st.columns(3)
 # 第一行3个按钮
+col1, col2, col3 = st.columns(3)
 if col1.button(suggest_questions[0]):
     st.session_state.user_query = suggest_questions[0]
 if col2.button(suggest_questions[1]):
@@ -67,14 +68,21 @@ if col2.button(suggest_questions[1]):
 if col3.button(suggest_questions[2]):
     st.session_state.user_query = suggest_questions[2]
 
+# 第二行2个按钮
 col4, col5, _ = st.columns(3)
-# 第二行剩下2个按钮
 if col4.button(suggest_questions[3]):
     st.session_state.user_query = suggest_questions[3]
 if col5.button(suggest_questions[4]):
     st.session_state.user_query = suggest_questions[4]
 
-# 输入框，同步按钮选中内容
+# =====新增：兜底【电话黄页】按钮，单独一行放在下方=====
+st.markdown("")
+st.markdown("**📞快捷查询**")
+phone_col, _, _ = st.columns(3)
+if phone_col.button("电话黄页"):
+    st.session_state.user_query = PHONE_QUERY
+
+# 输入框
 user_input = st.text_input("输入你想咨询的校园问题：", value=st.session_state.user_query)
 
 if st.button("发起查询") and user_input:
@@ -82,3 +90,4 @@ if st.button("发起查询") and user_input:
         docs = load_context()
         answer = llm_call(SYSTEM_PROMPTS[identity], user_input, docs)
         st.markdown(f"**回答：** {answer}")
+
