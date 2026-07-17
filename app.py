@@ -8,7 +8,7 @@ from requests.exceptions import ReadTimeout
 # ===================== 全局配置常量（结构优化：统一管理） =====================
 # API配置
 API_URL = "https://api.siliconflow.cn/v1/chat/completions"
-MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+MODEL_NAME = "deepseek-ai/DeepSeek-V4-Pro"
 API_KEY = "sk-rmnuzjfjyewewssshwbcjjszhpeqpxmakgyaenguiqmwablv"
 REQUEST_TIMEOUT = 30
 MAX_RETRY = 2  # 超时最大重试次数
@@ -101,23 +101,24 @@ def get_system_prompt(role, info):
     return base_prompt
 
 
-def llm_call(sys_prompt, user_query):
+def llm_call(sys_prompt, chat_history):
     """
-    调用硅基流动大模型接口，增加超时重试、异常捕获
+    调用硅基流动大模型接口，支持多轮对话历史，增加超时重试、异常捕获
     :param sys_prompt: 系统提示词
-    :param user_query: 用户输入问题
+    :param chat_history: 列表，存储多轮user/assistant对话记录
     :return: 模型回答文本 / 异常提示文本
     """
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
+    # 构造完整消息队列：系统提示词 + 全部历史对话
+    messages = [{"role": "system", "content": sys_prompt}]
+    messages.extend(chat_history)
+
     payload = {
         "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": user_query}
-        ]
+        "messages": messages
     }
 
     # 超时重试逻辑
@@ -150,15 +151,29 @@ def llm_call(sys_prompt, user_query):
 # ===================== 页面初始化 =====================
 if "question" not in st.session_state:
     st.session_state.question = ""
-# 历史仅存储：时间、身份、提问内容
+# 【按照课件修改】history存储：time、role、question、answer
 if "history" not in st.session_state:
     st.session_state.history = []
+# 【新增】真正用于多轮对话上下文存储
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+# 记录上一次选中身份，切换身份清空对话上下文
+if "last_identity" not in st.session_state:
+    st.session_state.last_identity = ""
 
 # ===================== 页面主体渲染 =====================
 st.title("小航｜郑州航院校园信息AI助手")
 identity = st.radio("请选择你的身份", ["新生", "在校生", "教师"])
 
-# ============【新增分类标签页推荐问题，替换原来平铺按钮】============
+# 切换身份 → 清空多轮对话记忆（重要：不同身份提示词不一样）
+if identity != st.session_state.last_identity:
+    st.session_state.chat_messages = []
+    # 判断：不是页面首次加载才弹出提示
+    if st.session_state.last_identity != "":
+        st.info("身份已切换，对话上下文已重置！")
+    st.session_state.last_identity = identity
+
+# ============【分类标签页推荐问题】============
 st.markdown("**✨试试这些问题：**")
 tab1, tab2, tab3 = st.tabs(["新生指南", "办事流程", "应急防骗"])
 
@@ -214,8 +229,12 @@ if st.button("发起查询"):
         start_time = time.time()
         with st.spinner("小航正在思考..."):
             school_data = load_school_info()
-            full_sys_prompt = get_system_prompt(identity, clean_input)
-            answer_result = llm_call(full_sys_prompt, clean_input)
+            full_sys_prompt = get_system_prompt(identity, school_data)
+            # 将本轮用户问题加入对话上下文
+            st.session_state.chat_messages.append({"role": "user", "content": clean_input})
+            # 调用接口（携带全部历史对话）
+            answer_result = llm_call(full_sys_prompt, st.session_state.chat_messages)
+
         end_time = time.time()
         cost_time = round(end_time - start_time, 1)
 
@@ -224,31 +243,49 @@ if st.button("发起查询"):
             st.error(f"提示：{answer_result}")
         else:
             st.success(f"**回答：** {answer_result}")
+            # AI回复正常 → 存入多轮对话
+            st.session_state.chat_messages.append({"role": "assistant", "content": answer_result})
+            # =========【课件要求：保存完整问答记录（包含answer）】=========
+            st.session_state.history.append({
+                "time": time.strftime("%H:%M:%S"),
+                "role": identity,
+                "question": clean_input,
+                "answer": answer_result
+            })
         # 展示接口耗时（实习必做交互优化）
         st.caption(f"本次提问耗时：{cost_time} 秒")
-
-        # 保存历史提问（仅记录问题，不存回答）
-        st.session_state.history.append({
-            "time": time.strftime("%H:%M:%S"),
-            "role": identity,
-            "query": user_input
-        })
         st.session_state["question"] = ""
 
-# 历史提问区域 + 清空按钮（实习必做）
+# 问答历史区域 + 导出对话 + 清空按钮
 st.divider()
-col_his, col_clear = st.columns([4, 1])
+col_his, col_export, col_clear = st.columns([3, 1, 1])
 with col_his:
-    st.subheader("📜历史提问记录")
+    st.subheader("📜问答历史")
+with col_export:
+    # 课件：导出对话txt
+    if st.session_state.get("history"):
+        text = ""
+        for item in st.session_state["history"]:
+            text += f"[{item['time']}] {item['role']} 提问：{item['question']}\n"
+            text += f"回答：{item['answer']}\n"
+            text += "---\n"
+        st.download_button(
+            label="导出对话记录",
+            data=text,
+            file_name=f"小航对话记录_{time.strftime('%Y%m%d')}.txt",
+            mime="text/plain"
+        )
 with col_clear:
     if st.button("清空历史"):
         st.session_state.history = []
+        st.session_state.chat_messages = []  # 同时清空多轮对话上下文
         st.rerun()
 
-# 渲染历史提问，仅展示用户问题
+# 【课件标准渲染代码：倒序展示，同时输出提问+回答】
 if st.session_state.history:
-    for record in reversed(st.session_state.history):
-        st.write(f"[{record['time']}] {record['role']}：{record['query']}")
+    for item in reversed(st.session_state["history"]):
+        st.write(f"[{item['time']}] {item['role']} 提问：{item['question']}")
+        st.write(f"回答：{item['answer']}")
+        st.caption("————————————————")
 else:
-    st.caption("暂无历史提问记录")
-
+    st.caption("暂无问答历史记录")
