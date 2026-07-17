@@ -1,0 +1,17 @@
+Python 缓存
+pycache/
+*.pyc
+*.pyo
+*.pyd
+*.log
+虚拟环境
+venv/
+env/
+.venv/
+本地临时文件
+*.txt
+*.md
+data/
+h/
+.DS_Store
+.vscode/

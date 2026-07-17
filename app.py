@@ -76,7 +76,7 @@ def load_school_info():
 
 
 def get_system_prompt(role, info):
-    """
+    """S
     根据用户身份拼接系统提示词，内置回答硬性规则
     :param role: 用户身份 新生/在校生/教师
     :param info: 读取到的校园md资料
